@@ -310,7 +310,7 @@ namespace Voxels
 
         // File properties
         public string filePath;
-        public bool fileStoring = true;
+        public bool fileStoring = false;
         public FileFormat fileFormat = FileFormat.PNG;
 
         // Voxel Mesh setting

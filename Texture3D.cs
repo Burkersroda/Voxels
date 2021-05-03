@@ -157,7 +157,7 @@ namespace Voxels
 
         // File properties
         public string filePath;
-        public bool fileStoring = true;
+        public bool fileStoring = false;
 
         // Return current progress
         public float CurrentProgress

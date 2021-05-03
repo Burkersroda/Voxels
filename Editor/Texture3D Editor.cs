@@ -85,7 +85,7 @@ namespace Voxels
             {
                 filePath = null;
             }
-            else if (filePath.Length == 0)
+            else if (filePath != null && filePath.Length == 0)
             {
                 filePath = null;
             }
