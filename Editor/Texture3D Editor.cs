@@ -8,8 +8,8 @@
 //--------------------------------
 
 
-using UnityEngine;
 using UnityEditor;
+using UnityEngine;
 
 
 namespace Voxels
@@ -20,10 +20,24 @@ namespace Voxels
     public class VoxelTexture3DEditor : Editor
     {
 
+        // Names and indices of the target file formats
+        static string[] fileFormatNames = new string[] { "None", "JPEG", "PNG", "TGA", "EXR", "Asset File" };
+        static int[] fileFormatModes = new int[] { -1, (int)Texture2D.FileFormat.JPG, (int)Texture2D.FileFormat.PNG, (int)Texture2D.FileFormat.TGA, (int)Texture2D.FileFormat.EXR, (int)Texture2D.FileFormat.Asset };
+        static string[] fileFormatExtensions = new string[] { "jpg", "png", "tga", "exr", "asset" };
+
+
         // Show and process inspector
         public override void OnInspectorGUI()
         {
             var voxelTexture = (Texture3D)target;
+
+            // Sampling slider and power of two toggle mode
+            int samplingCount = EditorGUILayout.IntSlider("Supersampling Count", voxelTexture.superSamplingCount, 1, 16);
+            if (voxelTexture.superSamplingCount != samplingCount)
+            {
+                Undo.RecordObject(voxelTexture, "Supersampling Count Change");
+                voxelTexture.superSamplingCount = samplingCount;
+            }
 
             bool powerOfTwo = EditorGUILayout.Toggle("Power of Two", voxelTexture.powerOfTwo);
             if (voxelTexture.powerOfTwo != powerOfTwo)
@@ -32,16 +46,55 @@ namespace Voxels
                 voxelTexture.powerOfTwo = powerOfTwo;
             }
 
-            // Path of the target file
-            EditorGUILayout.BeginHorizontal();
-            var fileStoring = EditorGUILayout.ToggleLeft("Asset File", voxelTexture.fileStoring, GUILayout.MaxWidth(116));
-            if (voxelTexture.fileStoring != fileStoring)
+            // Expand edges flag and background color
+            bool expandEdges = EditorGUILayout.Toggle("Expand Edges", voxelTexture.expandEdges);
+            if (voxelTexture.expandEdges != expandEdges)
+            {
+                Undo.RecordObject(voxelTexture, "Expand Edges Flag Change");
+                voxelTexture.expandEdges = expandEdges;
+            }
+            if (!expandEdges)
+            {
+                Color color = EditorGUILayout.ColorField("Background Color", voxelTexture.backgroundColor);
+                if (voxelTexture.backgroundColor != color)
+                {
+                    Undo.RecordObject(voxelTexture, "Background Color Change");
+                    voxelTexture.backgroundColor = color;
+                }
+            }
+
+            // Popup menu for file format
+            var fileFormat = (Texture3D.FileFormat)EditorGUILayout.IntPopup("Target File", voxelTexture.fileStoring ? (int)voxelTexture.fileFormat : fileFormatModes[0], fileFormatNames, fileFormatModes);
+            var fileStoring = (int)fileFormat != fileFormatModes[0];
+            if (fileStoring && voxelTexture.fileFormat != fileFormat)
+            {
+                if (!string.IsNullOrWhiteSpace(voxelTexture.filePath))
+                {
+                    // Replace extension after format change
+                    var extension = System.IO.Path.GetExtension(voxelTexture.filePath);
+                    if (!string.IsNullOrEmpty(voxelTexture.filePath))
+                    {
+                        if (string.Compare(extension, "." + fileFormatExtensions[(int)voxelTexture.fileFormat], true) == 0)
+                        {
+                            voxelTexture.filePath = voxelTexture.filePath.Substring(0, voxelTexture.filePath.Length - extension.Length + 1) + fileFormatExtensions[(int)fileFormat];
+                        }
+                    }
+                }
+
+                Undo.RecordObject(voxelTexture, "File Format Change");
+                voxelTexture.fileFormat = fileFormat;
+                voxelTexture.fileStoring = true;
+            }
+            else if (voxelTexture.fileStoring != fileStoring)
             {
                 Undo.RecordObject(voxelTexture, "File Storing Flag Change");
                 voxelTexture.fileStoring = fileStoring;
             }
-            EditorGUI.BeginDisabledGroup(!fileStoring);
-            string filePath = EditorGUILayout.TextField(voxelTexture.filePath == null ? "" : voxelTexture.filePath);
+
+            // Path of the target file
+            EditorGUILayout.BeginHorizontal();
+            GUI.enabled = fileStoring;
+            string filePath = EditorGUILayout.TextField("File Path", voxelTexture.filePath == null ? "" : voxelTexture.filePath);
             if (GUILayout.Button("...", GUILayout.MaxWidth(24)))
             {
                 string directory;
@@ -80,12 +133,12 @@ namespace Voxels
             {
                 filePath = null;
             }
-            EditorGUI.EndDisabledGroup();
+            GUI.enabled = true;
             if (GUILayout.Button("X", GUILayout.MaxWidth(24)))
             {
                 filePath = null;
             }
-            else if (filePath.Length == 0)
+            else if (filePath != null && filePath.Length == 0)
             {
                 filePath = null;
             }

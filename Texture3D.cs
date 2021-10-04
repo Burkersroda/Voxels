@@ -21,6 +21,19 @@ namespace Voxels
     public class Texture3D : Processor
     {
 
+        /// <summary>
+        /// Format of the target file
+        /// </summary>
+        [System.Serializable]
+        public enum FileFormat
+        {
+            JPG,
+            PNG,
+            TGA,
+            EXR,
+            Asset,
+        }
+
         // Class, which is doing the actual work
         public class Process
         {
@@ -35,8 +48,17 @@ namespace Voxels
                 }
             }
 
+            // Number of samples per axis to merge into one voxel
+            public int superSamplingCount = 1;
+
             // Flag to create textures with 2^n resolution
             public bool powerOfTwo = false;
+
+            // Flag to fill background with colors from content
+            public bool expandEdges = false;
+
+            // Color to fill empty cells with
+            public Color backgroundColor = new Color(0, 0, 0, 0);
 
             // Current processing position
             float currentProgress = 0;
@@ -53,6 +75,9 @@ namespace Voxels
 
             // Array to colors for all texels
             Color[] texels;
+
+            // Array of number of merged colors per texel
+            float[] counts;
 
             // Build voxel object
             public virtual float Build(Storage voxels, Bounds bounds)
@@ -74,9 +99,14 @@ namespace Voxels
 
                             if (texture == null)
                             {
-                                int textureWidth = voxels.Width;
-                                int textureHeight = voxels.Height;
-                                int textureDepth = voxels.Depth;
+                                if (superSamplingCount <= 0)
+                                {
+                                    superSamplingCount = 1;
+                                }
+
+                                int textureWidth = (voxels.Width + superSamplingCount - 1) / superSamplingCount;
+                                int textureHeight = (voxels.Height + superSamplingCount - 1) / superSamplingCount;
+                                int textureDepth = (voxels.Depth + superSamplingCount - 1) / superSamplingCount;
 
                                 // Make resolution 2^n, if flag is set
                                 if (powerOfTwo)
@@ -89,9 +119,10 @@ namespace Voxels
                                 if (textureWidth != 0 && textureHeight != 0 && textureDepth != 0)
                                 {
                                     texels = new Color[textureWidth * textureHeight * textureDepth];
+                                    counts = new float[textureWidth * textureHeight * textureDepth];
 
                                     // Create new texture instance
-                                    texture = new UnityEngine.Texture3D(voxels.Width, voxels.Height, voxels.Depth, voxels.HasHDR() ? TextureFormat.RGBAHalf : TextureFormat.ARGB32, false);
+                                    texture = new UnityEngine.Texture3D(textureWidth, textureHeight, textureDepth, voxels.HasHDR() ? TextureFormat.RGBAHalf : TextureFormat.RGBA32, 4);
                                     if (texture != null)
                                     {
                                         //texture.filterMode = FilterMode.Point;
@@ -112,8 +143,11 @@ namespace Voxels
                                     // Check for valid voxel
                                     if (color.a > 0)
                                     {
+                                        var index = x / superSamplingCount + (y / superSamplingCount + z / superSamplingCount * texture.height) * texture.width;
+
                                         // Store color to texels array
-                                        texels[x + (y + z * texture.height) * texture.width] = color;
+                                        texels[index] += color;
+                                        ++counts[index];
                                     }
                                     else
                                     {
@@ -129,6 +163,105 @@ namespace Voxels
                                 }
                                 else
                                 {
+                                    // Calculate weight factor for every source cell
+                                    var samplingFactor = 1f / (superSamplingCount * superSamplingCount * superSamplingCount);
+
+                                    // Normalize colors and expand edges or blend with background
+                                    for (int index = 0; index < texels.Length; ++index)
+                                    {
+                                        if (counts[index] > 0)
+                                        {
+                                            if (expandEdges)
+                                            {
+                                                texels[index].r /= counts[index];
+                                                texels[index].g /= counts[index];
+                                                texels[index].b /= counts[index];
+                                                texels[index].a *= samplingFactor;
+                                            }
+                                            else
+                                            {
+                                                texels[index] /= counts[index];
+                                                texels[index] += backgroundColor * (1 - texels[index].a);
+                                            }
+                                        }
+                                        else
+                                        {
+                                            if (!expandEdges)
+                                            {
+                                                texels[index] = backgroundColor;
+                                            }
+                                        }
+                                    }
+
+                                    if (expandEdges)
+                                    {
+                                        bool repeat;
+
+                                        do
+                                        {
+                                            repeat = false;
+
+                                            for (int index = 0; index < texels.Length; ++index)
+                                            {
+                                                if (counts[index] == 0)
+                                                {
+                                                    var column = index % texture.width;
+                                                    var row = index / texture.width % texture.height;
+                                                    var slice = index / texture.width / texture.height;
+
+                                                    var color = new Color(0, 0, 0, 0);
+                                                    var count = 0f;
+
+                                                    for (int offset = 0; offset < 6; ++offset)
+                                                    {
+                                                        var offsetX = offset == 0 ? -1 : offset == 1 ? 1 : 0;
+                                                        var offsetY = offset == 2 ? -1 : offset == 3 ? 1 : 0;
+                                                        var offsetZ = offset == 4 ? -1 : offset == 5 ? 1 : 0;
+
+                                                        var offsetColumn = column + offsetX;
+                                                        if (offsetColumn >= 0 && offsetColumn < texture.width)
+                                                        {
+                                                            var offsetRow = row + offsetY;
+                                                            if (offsetRow >= 0 && offsetRow < texture.height)
+                                                            {
+                                                                var offsetSlice = slice + offsetZ;
+                                                                if (offsetSlice >= 0 && offsetSlice < texture.depth)
+                                                                {
+                                                                    var offsetIndex = offsetColumn + (offsetRow + offsetSlice * texture.height) * texture.width;
+
+                                                                    if (counts[offsetIndex] > 0)
+                                                                    {
+                                                                        color += texels[offsetIndex];
+                                                                        ++count;
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+
+                                                    if (count > 0)
+                                                    {
+                                                        texels[index].r = color.r / count;
+                                                        texels[index].g = color.g / count;
+                                                        texels[index].b = color.b / count;
+                                                        texels[index].a = 0;
+                                                        counts[index] = -count;
+                                                        repeat = true;
+                                                    }
+                                                }
+                                            }
+
+                                            for (int index = 0; index < texels.Length; ++index)
+                                            {
+                                                if (counts[index] < 0)
+                                                {
+                                                    counts[index] = -counts[index];
+                                                }
+                                            }
+                                        }
+                                        while (repeat);
+                                    }
+
                                     // Transfer all texel colors to the texture
                                     texture.SetPixels(texels);
                                 }
@@ -157,7 +290,8 @@ namespace Voxels
 
         // File properties
         public string filePath;
-        public bool fileStoring = true;
+        public bool fileStoring = false;
+        public FileFormat fileFormat = FileFormat.Asset;
 
         // Return current progress
         public float CurrentProgress
@@ -177,8 +311,17 @@ namespace Voxels
             }
         }
 
+        // Number of samples per axis to merge into one voxel
+        public int superSamplingCount = 1;
+
         // Access power-of-two creation flag at the processor
         public bool powerOfTwo = false;
+
+        // Flag to fill background with colors from content
+        public bool expandEdges = false;
+
+        // Color to fill empty cells with
+        public Color backgroundColor = Color.black;
 
 
         // Return increased priority to process before VoxelMesh
@@ -190,7 +333,10 @@ namespace Voxels
         // Build voxel object
         public override float Build(Storage voxels, Bounds bounds, Informer informer, object parameter)
         {
+            processor.superSamplingCount = superSamplingCount;
             processor.powerOfTwo = powerOfTwo;
+            processor.expandEdges = expandEdges;
+            processor.backgroundColor = backgroundColor;
 
             // Execute real build-up method
             float progress = processor.Build(voxels, bounds);
@@ -201,8 +347,142 @@ namespace Voxels
                 // Store file, if it is specified
                 if (fileStoring && filePath != null && filePath.Length > 0 && Texture != null)
                 {
-                    // Save texture as asset file
-                    Helper.StoreAsset(processor.Texture, filePath, null);
+                    try
+                    {
+                        // Build target path
+                        switch (fileFormat)
+                        {
+                            case FileFormat.JPG:
+                            case FileFormat.PNG:
+                            case FileFormat.TGA:
+                            case FileFormat.EXR:
+
+                                var source = processor.Texture;
+                                if (source)
+                                {
+                                    var sourceData = source.GetPixelData<byte>(0);
+                                    if (sourceData != null)
+                                    {
+                                        var length = source.width * source.height * source.depth;
+                                        //var textureWidth = Mathf.CeilToInt(Mathf.Sqrt(length));
+
+                                        var textureWidth = (int)Math.Pow(2, Math.Ceiling(Math.Log(Mathf.Sqrt(length)) / Math.Log(2)));
+
+                                        var columnsCount = Mathf.CeilToInt((float)textureWidth / source.width);
+                                        var rowsCount = Mathf.CeilToInt((float)source.depth / columnsCount);
+
+                                        textureWidth = source.width * columnsCount;
+                                        var textureHeight = source.height * rowsCount;
+
+                                        var pixelSize = voxels.HasHDR() ? 8 : 4;
+                                        var lineSize = source.width * pixelSize;
+
+                                        var buffer = new byte[lineSize];
+                                        var targetData = new byte[textureWidth * textureHeight * pixelSize];
+                                        if (targetData != null)
+                                        {
+                                            var sourceOffset = 0;
+
+                                            // Process depth slices
+                                            for (int slice = 0; slice < source.depth; ++slice)
+                                            {
+                                                // Calculate column and row of the target sub image
+                                                var column = slice % columnsCount;
+                                                var row = rowsCount - slice / columnsCount - 1;
+
+                                                // Process lines of the current slice
+                                                for (int line = 0; line < source.height; ++line)
+                                                {
+                                                    // Get data for line into the cache
+                                                    sourceData.GetSubArray(sourceOffset, lineSize).CopyTo(buffer);
+
+                                                    // Copy it to the target buffer
+                                                    Array.Copy(buffer, 0, targetData, (column + (line + row * source.height) * columnsCount) * lineSize, lineSize);
+
+                                                    sourceOffset += lineSize;
+                                                }
+                                            }
+
+                                            byte[] data;
+                                            var format = voxels.HasHDR() ? UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat : UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_SRGB;
+                                            switch (fileFormat)
+                                            {
+                                                case FileFormat.JPG:
+                                                    // Convert image data to JPEG data
+                                                    data = ImageConversion.EncodeArrayToJPG(targetData, format, (uint)textureWidth, (uint)textureHeight, 0, 100);
+                                                    break;
+
+                                                case FileFormat.PNG:
+                                                    // Convert image data to PNG data
+                                                    data = ImageConversion.EncodeArrayToPNG(targetData, format, (uint)textureWidth, (uint)textureHeight);
+                                                    break;
+
+                                                case FileFormat.TGA:
+                                                    // Convert image data to TGA data
+                                                    data = ImageConversion.EncodeArrayToTGA(targetData, format, (uint)textureWidth, (uint)textureHeight);
+                                                    break;
+
+                                                case FileFormat.EXR:
+                                                    // Convert image data to EXR data
+                                                    data = ImageConversion.EncodeArrayToEXR(targetData, format, (uint)textureWidth, (uint)textureHeight, 0, UnityEngine.Texture2D.EXRFlags.CompressZIP);
+                                                    break;
+
+                                                default:
+                                                    data = null;
+                                                    break;
+                                            }
+
+                                            if (data != null)
+                                            {
+                                                // Make sure the target folders exist
+                                                var path = System.IO.Path.Combine(Application.dataPath, filePath);
+                                                if (Helper.CreateDirectory(path, true))
+                                                {
+
+#if UNITY_EDITOR
+
+                                                    // Remove existing asset file
+                                                    if (System.IO.File.Exists(path))
+                                                    {
+                                                        System.IO.File.Delete(path);
+                                                    }
+
+                                                    // Update database
+                                                    UnityEditor.AssetDatabase.Refresh();
+
+#endif
+
+                                                    // Save data to file
+                                                    System.IO.File.WriteAllBytes(path, data);
+
+#if UNITY_EDITOR
+
+                                                    // Store columns and rows for the asset to be applied later
+                                                    voxelTexturePaths.Add(System.IO.Path.GetFullPath(path), new Vector2Int(columnsCount, rowsCount));
+
+                                                    // Update database to enable changing import settings
+                                                    UnityEditor.AssetDatabase.Refresh();
+
+#endif
+
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                break;
+
+                            default:
+                                // Save texture as asset file
+                                Helper.StoreAsset(processor.Texture, filePath, null);
+                                break;
+                        }
+                    }
+                    catch (System.Exception exception)
+                    {
+                        Debug.Log(exception.Message);
+                    }
                 }
 
 #if UNITY_EDITOR
@@ -222,6 +502,78 @@ namespace Voxels
             return progress;
         }
 
+#if UNITY_EDITOR
+
+        /// <summary>
+        /// Hash table with import settings for added texture assets
+        /// </summary>
+        protected static Dictionary<string, Vector2Int> voxelTexturePaths = new Dictionary<string, Vector2Int>();
+
+        /// <summary>
+        /// Retrieve import settings for texture with given path
+        /// </summary>
+        /// <param name="path">File path</param>
+        /// <returns>Import settings</returns>
+        public static Vector2Int GetTilingDimension(string path)
+        {
+            // Get full path for comparison
+            path = System.IO.Path.GetFullPath(path);
+
+            // Try to get settings from hash table
+            Vector2Int dimension;
+            if (voxelTexturePaths.TryGetValue(path, out dimension))
+            {
+                // Remove element
+                voxelTexturePaths.Remove(path);
+
+                return dimension;
+            }
+
+            return Vector2Int.zero;
+        }
+
+#endif
+
     }
+
+#if UNITY_EDITOR
+
+    /// <summary>
+    /// Class to change import settings for volume textures
+    /// </summary>
+    public class Texture3DPostProcessor : UnityEditor.AssetPostprocessor
+    {
+
+        /// <summary>
+        /// Prepare texture for importing
+        /// </summary>
+        void OnPreprocessTexture()
+        {
+            // Try to get import setting for the texture
+            var dimension = Texture3D.GetTilingDimension(assetPath);
+            if (dimension.x > 0 && dimension.y > 0)
+            {
+                var textureImporter = assetImporter as UnityEditor.TextureImporter;
+                if (textureImporter)
+                {
+                    // Change import settings to 3D texture using the columns and rows
+                    var settings = new UnityEditor.TextureImporterSettings();
+                    textureImporter.ReadTextureSettings(settings);
+                    settings.textureShape = UnityEditor.TextureImporterShape.Texture3D;
+                    settings.flipbookColumns = dimension.x;
+                    settings.flipbookRows = dimension.y;
+                    settings.sRGBTexture = false;
+                    settings.alphaSource = UnityEditor.TextureImporterAlphaSource.FromInput;
+                    settings.alphaIsTransparency = true;
+                    settings.mipmapEnabled = true;
+                    settings.filterMode = FilterMode.Trilinear;
+                    textureImporter.SetTextureSettings(settings);
+                }
+            }
+        }
+
+    }
+
+#endif
 
 }
