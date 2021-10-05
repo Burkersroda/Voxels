@@ -1,7 +1,7 @@
 ﻿//--------------------------------
 //
 // Voxels for Unity
-//  Version: 1.22.6
+//  Version: 1.23.7
 //
 // © 2014-21 by Ronny Burkersroda
 //
@@ -21,9 +21,47 @@ namespace Voxels
     {
 
         // Names and indices of the target file formats
-        static string[] fileFormatNames = new string[] { "None", "JPEG", "PNG", "TGA", "EXR", "Asset File" };
-        static int[] fileFormatModes = new int[] { -1, (int)Texture2D.FileFormat.JPG, (int)Texture2D.FileFormat.PNG, (int)Texture2D.FileFormat.TGA, (int)Texture2D.FileFormat.EXR, (int)Texture2D.FileFormat.Asset };
-        static string[] fileFormatExtensions = new string[] { "jpg", "png", "tga", "exr", "asset" };
+        static string[] fileFormatNames = new string[] {
+            "None",
+
+#if UNITY_2020_2_OR_NEWER
+
+            "JPEG",
+            "PNG",
+            //"TGA",
+            "EXR",
+
+#endif
+
+            "Asset File"
+        };
+        static int[] fileFormatModes = new int[] {
+            -1,
+
+#if UNITY_2020_2_OR_NEWER
+
+            (int)Texture3D.FileFormat.JPG,
+            (int)Texture3D.FileFormat.PNG,
+            //(int)Texture3D.FileFormat.TGA,
+            (int)Texture3D.FileFormat.EXR,
+
+#endif
+
+            (int)Texture3D.FileFormat.Asset
+        };
+        static string[] fileFormatExtensions = new string[] {
+            "asset",
+
+#if UNITY_2020_2_OR_NEWER
+
+            "jpg",
+            "png",
+            "tga",
+            "exr",
+
+#endif
+
+        };
 
 
         // Show and process inspector
@@ -74,7 +112,7 @@ namespace Voxels
                     var extension = System.IO.Path.GetExtension(voxelTexture.filePath);
                     if (!string.IsNullOrEmpty(voxelTexture.filePath))
                     {
-                        if (string.Compare(extension, "." + fileFormatExtensions[(int)voxelTexture.fileFormat], true) == 0)
+                        if (string.Compare(extension, "." + fileFormatExtensions[System.Math.Min((int)voxelTexture.fileFormat, fileFormatExtensions.Length - 1)], true) == 0)
                         {
                             voxelTexture.filePath = voxelTexture.filePath.Substring(0, voxelTexture.filePath.Length - extension.Length + 1) + fileFormatExtensions[(int)fileFormat];
                         }

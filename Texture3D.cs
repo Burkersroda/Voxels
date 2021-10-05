@@ -1,7 +1,7 @@
 ﻿//--------------------------------
 //
 // Voxels for Unity
-//  Version: 1.22.6
+//  Version: 1.23.7
 //
 // © 2014-21 by Ronny Burkersroda
 //
@@ -27,11 +27,17 @@ namespace Voxels
         [System.Serializable]
         public enum FileFormat
         {
+            Asset,
+
+#if UNITY_2020_2_OR_NEWER
+
             JPG,
             PNG,
             TGA,
             EXR,
-            Asset,
+
+#endif
+
         }
 
         // Class, which is doing the actual work
@@ -59,6 +65,9 @@ namespace Voxels
 
             // Color to fill empty cells with
             public Color backgroundColor = new Color(0, 0, 0, 0);
+
+            // Flag to use a floating point texture
+            public bool hdr = false;
 
             // Current processing position
             float currentProgress = 0;
@@ -104,6 +113,7 @@ namespace Voxels
                                     superSamplingCount = 1;
                                 }
 
+                                // Calculate target resolution
                                 int textureWidth = (voxels.Width + superSamplingCount - 1) / superSamplingCount;
                                 int textureHeight = (voxels.Height + superSamplingCount - 1) / superSamplingCount;
                                 int textureDepth = (voxels.Depth + superSamplingCount - 1) / superSamplingCount;
@@ -121,8 +131,10 @@ namespace Voxels
                                     texels = new Color[textureWidth * textureHeight * textureDepth];
                                     counts = new float[textureWidth * textureHeight * textureDepth];
 
+                                    hdr |= voxels.HasHDR();
+
                                     // Create new texture instance
-                                    texture = new UnityEngine.Texture3D(textureWidth, textureHeight, textureDepth, voxels.HasHDR() ? TextureFormat.RGBAHalf : TextureFormat.RGBA32, 4);
+                                    texture = new UnityEngine.Texture3D(textureWidth, textureHeight, textureDepth, hdr ? TextureFormat.RGBAHalf : TextureFormat.RGBA32, 4);
                                     if (texture != null)
                                     {
                                         //texture.filterMode = FilterMode.Point;
@@ -201,8 +213,10 @@ namespace Voxels
                                         {
                                             repeat = false;
 
+                                            // Process all cells
                                             for (int index = 0; index < texels.Length; ++index)
                                             {
+                                                // Check if current cell is empty
                                                 if (counts[index] == 0)
                                                 {
                                                     var column = index % texture.width;
@@ -212,8 +226,10 @@ namespace Voxels
                                                     var color = new Color(0, 0, 0, 0);
                                                     var count = 0f;
 
+                                                    // Sum up all colors of direct neighbor cells 
                                                     for (int offset = 0; offset < 6; ++offset)
                                                     {
+                                                        // Get offset by current index
                                                         var offsetX = offset == 0 ? -1 : offset == 1 ? 1 : 0;
                                                         var offsetY = offset == 2 ? -1 : offset == 3 ? 1 : 0;
                                                         var offsetZ = offset == 4 ? -1 : offset == 5 ? 1 : 0;
@@ -229,8 +245,10 @@ namespace Voxels
                                                                 {
                                                                     var offsetIndex = offsetColumn + (offsetRow + offsetSlice * texture.height) * texture.width;
 
+                                                                    // Check if neighbor includes an original color or one that has been set in a previous iteration
                                                                     if (counts[offsetIndex] > 0)
                                                                     {
+                                                                        // Sum color components and increase quantity counter for later normalization
                                                                         color += texels[offsetIndex];
                                                                         ++count;
                                                                     }
@@ -241,16 +259,20 @@ namespace Voxels
 
                                                     if (count > 0)
                                                     {
+                                                        // Normalize target color but set full transparency
                                                         texels[index].r = color.r / count;
                                                         texels[index].g = color.g / count;
                                                         texels[index].b = color.b / count;
                                                         texels[index].a = 0;
+
+                                                        // Flag index as processed in this loop and enable next one
                                                         counts[index] = -count;
                                                         repeat = true;
                                                     }
                                                 }
                                             }
 
+                                            // Unset processing flags for next iteration
                                             for (int index = 0; index < texels.Length; ++index)
                                             {
                                                 if (counts[index] < 0)
@@ -338,6 +360,12 @@ namespace Voxels
             processor.expandEdges = expandEdges;
             processor.backgroundColor = backgroundColor;
 
+#if UNITY_2020_2_OR_NEWER
+
+            processor.hdr = fileFormat == FileFormat.EXR;
+
+#endif
+
             // Execute real build-up method
             float progress = processor.Build(voxels, bounds);
 
@@ -352,6 +380,9 @@ namespace Voxels
                         // Build target path
                         switch (fileFormat)
                         {
+
+#if UNITY_2020_2_OR_NEWER
+
                             case FileFormat.JPG:
                             case FileFormat.PNG:
                             case FileFormat.TGA:
@@ -404,27 +435,26 @@ namespace Voxels
                                             }
 
                                             byte[] data;
-                                            var format = voxels.HasHDR() ? UnityEngine.Experimental.Rendering.GraphicsFormat.R16G16B16A16_SFloat : UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_SRGB;
                                             switch (fileFormat)
                                             {
                                                 case FileFormat.JPG:
                                                     // Convert image data to JPEG data
-                                                    data = ImageConversion.EncodeArrayToJPG(targetData, format, (uint)textureWidth, (uint)textureHeight, 0, 100);
+                                                    data = ImageConversion.EncodeArrayToJPG(targetData, source.graphicsFormat, (uint)textureWidth, (uint)textureHeight, 0, 100);
                                                     break;
 
                                                 case FileFormat.PNG:
                                                     // Convert image data to PNG data
-                                                    data = ImageConversion.EncodeArrayToPNG(targetData, format, (uint)textureWidth, (uint)textureHeight);
+                                                    data = ImageConversion.EncodeArrayToPNG(targetData, source.graphicsFormat, (uint)textureWidth, (uint)textureHeight);
                                                     break;
 
                                                 case FileFormat.TGA:
                                                     // Convert image data to TGA data
-                                                    data = ImageConversion.EncodeArrayToTGA(targetData, format, (uint)textureWidth, (uint)textureHeight);
+                                                    data = ImageConversion.EncodeArrayToTGA(targetData, source.graphicsFormat, (uint)textureWidth, (uint)textureHeight);
                                                     break;
 
                                                 case FileFormat.EXR:
                                                     // Convert image data to EXR data
-                                                    data = ImageConversion.EncodeArrayToEXR(targetData, format, (uint)textureWidth, (uint)textureHeight, 0, UnityEngine.Texture2D.EXRFlags.CompressZIP);
+                                                    data = ImageConversion.EncodeArrayToEXR(targetData, source.graphicsFormat, (uint)textureWidth, (uint)textureHeight, 0, UnityEngine.Texture2D.EXRFlags.CompressZIP);
                                                     break;
 
                                                 default:
@@ -472,6 +502,8 @@ namespace Voxels
                                 }
 
                                 break;
+
+#endif
 
                             default:
                                 // Save texture as asset file
@@ -536,7 +568,7 @@ namespace Voxels
 
     }
 
-#if UNITY_EDITOR
+#if UNITY_EDITOR && UNITY_2020_2_OR_NEWER
 
     /// <summary>
     /// Class to change import settings for volume textures
