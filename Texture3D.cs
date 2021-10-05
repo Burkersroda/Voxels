@@ -359,12 +359,7 @@ namespace Voxels
             processor.powerOfTwo = powerOfTwo;
             processor.expandEdges = expandEdges;
             processor.backgroundColor = backgroundColor;
-
-#if UNITY_2020_2_OR_NEWER
-
             processor.hdr = fileFormat == FileFormat.EXR;
-
-#endif
 
             // Execute real build-up method
             float progress = processor.Build(voxels, bounds);
@@ -405,7 +400,7 @@ namespace Voxels
                                         textureWidth = source.width * columnsCount;
                                         var textureHeight = source.height * rowsCount;
 
-                                        var pixelSize = voxels.HasHDR() ? 8 : 4;
+                                        var pixelSize = processor.hdr ? 8 : 4;
                                         var lineSize = source.width * pixelSize;
 
                                         var buffer = new byte[lineSize];
