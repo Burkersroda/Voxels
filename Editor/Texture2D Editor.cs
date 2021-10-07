@@ -71,8 +71,8 @@ namespace Voxels
 
             // Path of the target file
             EditorGUILayout.BeginHorizontal();
-            string filePath = EditorGUILayout.TextField("File Path", voxelTexture.filePath == null ? "" : voxelTexture.filePath);
             GUI.enabled = fileStoring;
+            string filePath = EditorGUILayout.TextField("File Path", voxelTexture.filePath == null ? "" : voxelTexture.filePath);
             if (GUILayout.Button("...", GUILayout.MaxWidth(24)))
             {
                 string directory;
@@ -117,6 +117,10 @@ namespace Voxels
             }
             GUI.enabled = true;
             if (GUILayout.Button("X", GUILayout.MaxWidth(24)))
+            {
+                filePath = null;
+            }
+            else if (filePath != null && filePath.Length == 0)
             {
                 filePath = null;
             }
